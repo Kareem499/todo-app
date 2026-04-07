@@ -1,98 +1,239 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useColorScheme,
+  View,
+} from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { TodoItem, type Todo } from '@/components/todo-item';
 
-export default function HomeScreen() {
+const STORAGE_KEY = '@todo_app_todos';
+
+export default function TodoScreen() {
+  const [todos, setTodos] = useState<Todo[]>([]);
+  const [inputText, setInputText] = useState('');
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+
+  useEffect(() => {
+    AsyncStorage.getItem(STORAGE_KEY)
+      .then((data) => {
+        if (data) {
+          setTodos(JSON.parse(data) as Todo[]);
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to load todos from storage:', error);
+      });
+  }, []);
+
+  const saveTodos = useCallback((updated: Todo[]) => {
+    setTodos(updated);
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated)).catch((error) => {
+      console.error('Failed to save todos to storage:', error);
+    });
+  }, []);
+
+  function addTodo() {
+    const text = inputText.trim();
+    if (!text) return;
+    const newTodo: Todo = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      text,
+      completed: false,
+    };
+    saveTodos([newTodo, ...todos]);
+    setInputText('');
+  }
+
+  function toggleTodo(id: string) {
+    saveTodos(todos.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
+  }
+
+  function deleteTodo(id: string) {
+    saveTodos(todos.filter((t) => t.id !== id));
+  }
+
+  function editTodo(id: string, text: string) {
+    saveTodos(todos.map((t) => (t.id === id ? { ...t, text } : t)));
+  }
+
+  const completedCount = todos.filter((t) => t.completed).length;
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <SafeAreaView style={[styles.safeArea, isDark ? styles.safeAreaDark : styles.safeAreaLight]}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}>
+        <View style={styles.header}>
+          <Text style={[styles.title, isDark ? styles.titleDark : styles.titleLight]}>
+            My Todos
+          </Text>
+          {todos.length > 0 && (
+            <Text style={styles.subtitle}>
+              {completedCount}/{todos.length} completed
+            </Text>
+          )}
+        </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+        <View style={[styles.inputRow, isDark ? styles.inputRowDark : styles.inputRowLight]}>
+          <TextInput
+            style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
+            placeholder="Add a new todo…"
+            placeholderTextColor={isDark ? '#9BA1A6' : '#687076'}
+            value={inputText}
+            onChangeText={setInputText}
+            onSubmitEditing={addTodo}
+            returnKeyType="done"
+            accessibilityLabel="New todo input"
+          />
+          <TouchableOpacity
+            style={[styles.addButton, !inputText.trim() && styles.addButtonDisabled]}
+            onPress={addTodo}
+            disabled={!inputText.trim()}
+            accessibilityLabel="Add todo"
+            accessibilityRole="button">
+            <Text style={styles.addButtonText}>Add</Text>
+          </TouchableOpacity>
+        </View>
+
+        {todos.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyEmoji}>📝</Text>
+            <Text style={[styles.emptyText, isDark ? styles.emptyTextDark : styles.emptyTextLight]}>
+              No todos yet. Add one above!
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            data={todos}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TodoItem
+                todo={item}
+                onToggle={toggleTodo}
+                onDelete={deleteTodo}
+                onEdit={editTodo}
+              />
+            )}
+            contentContainerStyle={styles.list}
+            keyboardShouldPersistTaps="handled"
+          />
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  flex: {
+    flex: 1,
+  },
+  safeArea: {
+    flex: 1,
+  },
+  safeAreaLight: {
+    backgroundColor: '#f2f6fa',
+  },
+  safeAreaDark: {
+    backgroundColor: '#0d0f10',
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 12,
+  },
+  title: {
+    fontSize: 34,
+    fontWeight: 'bold',
+  },
+  titleLight: {
+    color: '#11181C',
+  },
+  titleDark: {
+    color: '#ECEDEE',
+  },
+  subtitle: {
+    marginTop: 4,
+    fontSize: 14,
+    color: '#0a7ea4',
+    fontWeight: '600',
+  },
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  inputRowLight: {
+    backgroundColor: '#ffffff',
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  inputRowDark: {
+    backgroundColor: '#1e2022',
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    paddingVertical: 10,
+  },
+  inputLight: {
+    color: '#11181C',
+  },
+  inputDark: {
+    color: '#ECEDEE',
+  },
+  addButton: {
+    backgroundColor: '#0a7ea4',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginLeft: 8,
+  },
+  addButtonDisabled: {
+    opacity: 0.4,
+  },
+  addButtonText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  list: {
+    paddingHorizontal: 16,
+    paddingBottom: 32,
+  },
+  empty: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  emptyEmoji: {
+    fontSize: 48,
+  },
+  emptyText: {
+    fontSize: 16,
+  },
+  emptyTextLight: {
+    color: '#687076',
+  },
+  emptyTextDark: {
+    color: '#9BA1A6',
   },
 });
