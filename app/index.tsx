@@ -18,6 +18,7 @@ import * as Google from 'expo-auth-session/providers/google';
 WebBrowser.maybeCompleteAuthSession();
 
 const GOOGLE_CLIENT_ID = '500399867620-hqsbphh8utgcmjapuscurt91emed1sjn.apps.googleusercontent.com';
+const GOOGLE_REDIRECT_URL = 'https://auth.expo.io/@Kareem499/todo-app';
 const AUTH_TOKEN_KEY = 'google_auth_token';
 const USER_INFO_KEY = 'google_user_info';
 
@@ -43,6 +44,7 @@ const TodoApp = () => {
     const [request, response, promptAsync] = Google.useAuthRequest({
         clientId: GOOGLE_CLIENT_ID,
         scopes: ['profile', 'email'],
+        redirectUrl: GOOGLE_REDIRECT_URL,
     });
 
     const loadTodos = useCallback(async () => {
