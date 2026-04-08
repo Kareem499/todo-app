@@ -30,8 +30,14 @@ async function initDB() {
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       text TEXT NOT NULL,
       completed BOOLEAN DEFAULT FALSE,
+      deadline DATE DEFAULT NULL,
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
+  `);
+
+  // Add deadline column if it doesn't exist (for existing databases)
+  await pool.query(`
+    ALTER TABLE todos ADD COLUMN IF NOT EXISTS deadline DATE DEFAULT NULL;
   `);
 
   console.log('Database tables ready');
@@ -123,10 +129,10 @@ app.get('/api/todos/:userId', async (req, res) => {
 // POST create a todo
 app.post('/api/todos', async (req, res) => {
   try {
-    const { userId, text } = req.body;
+    const { userId, text, deadline } = req.body;
     const result = await pool.query(
-      'INSERT INTO todos (user_id, text) VALUES ($1, $2) RETURNING *',
-      [userId, text]
+      'INSERT INTO todos (user_id, text, deadline) VALUES ($1, $2, $3) RETURNING *',
+      [userId, text, deadline ?? null]
     );
     res.json(result.rows[0]);
   } catch (error) {
@@ -135,17 +141,18 @@ app.post('/api/todos', async (req, res) => {
   }
 });
 
-// PATCH update todo (completed and/or text)
+// PATCH update todo (completed, text, and/or deadline)
 app.patch('/api/todos/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { completed, text } = req.body;
+    const { completed, text, deadline } = req.body;
     const result = await pool.query(
       `UPDATE todos SET
         completed = COALESCE($1, completed),
-        text = COALESCE($2, text)
-       WHERE id = $3 RETURNING *`,
-      [completed ?? null, text ?? null, id]
+        text = COALESCE($2, text),
+        deadline = CASE WHEN $3::text IS NOT NULL THEN $3::date ELSE deadline END
+       WHERE id = $4 RETURNING *`,
+      [completed ?? null, text ?? null, deadline ?? null, id]
     );
     res.json(result.rows[0]);
   } catch (error) {
