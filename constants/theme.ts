@@ -27,3 +27,9 @@ export const DARK = {
 };
 
 export type Theme = typeof LIGHT;
+
+// Legacy export for tab layout compatibility
+export const Colors = {
+    light: { tint: LIGHT.primary },
+    dark: { tint: DARK.primary },
+};
