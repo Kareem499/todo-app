@@ -42,6 +42,32 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:19006/auth/callback';
 
+// Used by expo-auth-session flow (access token sent directly)
+app.post('/api/auth/google/token', async (req, res) => {
+  try {
+    const { accessToken } = req.body;
+
+    const userResponse = await axios.get('https://www.googleapis.com/userinfo/v2/me', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    const { id, email, name, picture } = userResponse.data;
+
+    await pool.query(
+      `INSERT INTO users (id, email, name, picture)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO UPDATE SET email=$2, name=$3, picture=$4`,
+      [id, email, name, picture]
+    );
+
+    res.json({ id, email, name, picture });
+  } catch (error) {
+    console.error('Auth error:', error.message);
+    res.status(400).json({ error: 'Authentication failed' });
+  }
+});
+
+// Used by auth code flow (kept for compatibility)
 app.post('/api/auth/google', async (req, res) => {
   try {
     const { code } = req.body;
@@ -109,14 +135,17 @@ app.post('/api/todos', async (req, res) => {
   }
 });
 
-// PATCH toggle completed
+// PATCH update todo (completed and/or text)
 app.patch('/api/todos/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { completed } = req.body;
+    const { completed, text } = req.body;
     const result = await pool.query(
-      'UPDATE todos SET completed = $1 WHERE id = $2 RETURNING *',
-      [completed, id]
+      `UPDATE todos SET
+        completed = COALESCE($1, completed),
+        text = COALESCE($2, text)
+       WHERE id = $3 RETURNING *`,
+      [completed ?? null, text ?? null, id]
     );
     res.json(result.rows[0]);
   } catch (error) {
