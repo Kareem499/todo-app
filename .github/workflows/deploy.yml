@@ -38,6 +38,9 @@ jobs:
         env:
           EXPO_ROUTER_BASE_URL: /todo-app
 
+      - name: Fix asset paths for GitHub Pages subdirectory
+        run: find dist -name "*.html" | xargs sed -i 's|"/_expo/|"/todo-app/_expo/|g'
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
