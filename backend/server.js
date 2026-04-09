@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -43,6 +44,28 @@ async function initDB() {
   console.log('Database tables ready');
 }
 
+// --- JWT helpers ---
+const JWT_SECRET = process.env.JWT_SECRET;
+
+function signToken(userId) {
+  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn: '30d' });
+}
+
+function authenticate(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+  }
+  const token = authHeader.slice(7);
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.userId = payload.sub;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
 // --- Auth ---
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -66,7 +89,8 @@ app.post('/api/auth/google/token', async (req, res) => {
       [id, email, name, picture]
     );
 
-    res.json({ id, email, name, picture });
+    const token = signToken(id);
+    res.json({ token, user: { id, email, name, picture } });
   } catch (error) {
     console.error('Auth error:', error.message);
     res.status(400).json({ error: 'Authentication failed' });
@@ -94,7 +118,6 @@ app.post('/api/auth/google', async (req, res) => {
 
     const { id, email, name, picture } = userResponse.data;
 
-    // Upsert user into DB
     await pool.query(
       `INSERT INTO users (id, email, name, picture)
        VALUES ($1, $2, $3, $4)
@@ -102,22 +125,22 @@ app.post('/api/auth/google', async (req, res) => {
       [id, email, name, picture]
     );
 
-    res.json({ id, email, name, picture });
+    const token = signToken(id);
+    res.json({ token, user: { id, email, name, picture } });
   } catch (error) {
     console.error('Auth error:', error.message);
     res.status(400).json({ error: 'Authentication failed' });
   }
 });
 
-// --- Todos ---
+// --- Todos (all routes protected by JWT) ---
 
 // GET all todos for a user
-app.get('/api/todos/:userId', async (req, res) => {
+app.get('/api/todos', authenticate, async (req, res) => {
   try {
-    const { userId } = req.params;
     const result = await pool.query(
       'SELECT * FROM todos WHERE user_id = $1 ORDER BY created_at ASC',
-      [userId]
+      [req.userId]
     );
     res.json(result.rows);
   } catch (error) {
@@ -127,12 +150,12 @@ app.get('/api/todos/:userId', async (req, res) => {
 });
 
 // POST create a todo
-app.post('/api/todos', async (req, res) => {
+app.post('/api/todos', authenticate, async (req, res) => {
   try {
-    const { userId, text, deadline } = req.body;
+    const { text, deadline } = req.body;
     const result = await pool.query(
       'INSERT INTO todos (user_id, text, deadline) VALUES ($1, $2, $3) RETURNING *',
-      [userId, text, deadline ?? null]
+      [req.userId, text, deadline ?? null]
     );
     res.json(result.rows[0]);
   } catch (error) {
@@ -142,7 +165,7 @@ app.post('/api/todos', async (req, res) => {
 });
 
 // PATCH update todo (completed, text, and/or deadline)
-app.patch('/api/todos/:id', async (req, res) => {
+app.patch('/api/todos/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
     const { completed, text, deadline } = req.body;
@@ -151,9 +174,10 @@ app.patch('/api/todos/:id', async (req, res) => {
         completed = COALESCE($1, completed),
         text = COALESCE($2, text),
         deadline = CASE WHEN $3::text IS NOT NULL THEN $3::date ELSE deadline END
-       WHERE id = $4 RETURNING *`,
-      [completed ?? null, text ?? null, deadline ?? null, id]
+       WHERE id = $4 AND user_id = $5 RETURNING *`,
+      [completed ?? null, text ?? null, deadline ?? null, id, req.userId]
     );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Todo not found' });
     res.json(result.rows[0]);
   } catch (error) {
     console.error('Update todo error:', error.message);
@@ -162,10 +186,10 @@ app.patch('/api/todos/:id', async (req, res) => {
 });
 
 // DELETE a todo
-app.delete('/api/todos/:id', async (req, res) => {
+app.delete('/api/todos/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query('DELETE FROM todos WHERE id = $1', [id]);
+    await pool.query('DELETE FROM todos WHERE id = $1 AND user_id = $2', [id, req.userId]);
     res.json({ success: true });
   } catch (error) {
     console.error('Delete todo error:', error.message);

@@ -7,33 +7,43 @@ const API_URL = 'http://localhost:3000';
 export function useTodos() {
     const [todos, setTodos] = useState<Todo[]>([]);
 
-    const fetchTodos = useCallback(async (userId: string) => {
+    // token is passed explicitly so callers always use the freshest value
+    const authHeaders = (token: string) => ({
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+    });
+
+    const fetchTodos = useCallback(async (token: string) => {
         try {
-            const res = await fetch(`${API_URL}/api/todos/${userId}`);
+            const res = await fetch(`${API_URL}/api/todos`, {
+                headers: authHeaders(token),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             setTodos(data);
             return data as Todo[];
-        } catch {
+        } catch (e) {
+            console.error('fetchTodos error:', e);
             Alert.alert('Error', 'Failed to load todos');
             return [];
         }
     }, []);
 
-    const addTodo = useCallback(async (userId: string, text: string, deadline: string | null) => {
+    const addTodo = useCallback(async (token: string, text: string, deadline: string | null) => {
         const res = await fetch(`${API_URL}/api/todos`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, text, deadline }),
+            headers: authHeaders(token),
+            body: JSON.stringify({ text, deadline }),
         });
         const newTodo: Todo = await res.json();
         setTodos(prev => [...prev, newTodo]);
         return newTodo;
     }, []);
 
-    const editTodo = useCallback(async (id: number, text: string, completed: boolean, deadline: string | null) => {
+    const editTodo = useCallback(async (token: string, id: number, text: string, completed: boolean, deadline: string | null) => {
         const res = await fetch(`${API_URL}/api/todos/${id}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(token),
             body: JSON.stringify({ text, completed, deadline }),
         });
         const updated: Todo = await res.json();
@@ -41,10 +51,10 @@ export function useTodos() {
         return updated;
     }, []);
 
-    const toggleTodo = useCallback(async (id: number, completed: boolean) => {
+    const toggleTodo = useCallback(async (token: string, id: number, completed: boolean) => {
         const res = await fetch(`${API_URL}/api/todos/${id}`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: authHeaders(token),
             body: JSON.stringify({ completed: !completed }),
         });
         const updated: Todo = await res.json();
@@ -52,8 +62,11 @@ export function useTodos() {
         return updated;
     }, []);
 
-    const deleteTodo = useCallback(async (id: number) => {
-        await fetch(`${API_URL}/api/todos/${id}`, { method: 'DELETE' });
+    const deleteTodo = useCallback(async (token: string, id: number) => {
+        await fetch(`${API_URL}/api/todos/${id}`, {
+            method: 'DELETE',
+            headers: authHeaders(token),
+        });
         setTodos(prev => prev.filter(t => t.id !== id));
     }, []);
 

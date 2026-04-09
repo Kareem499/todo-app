@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, FlatList, StyleSheet, ActivityIndicator, SafeAreaView, KeyboardAvoidingView, Platform, Text } from 'react-native';
 import { useColorScheme } from 'react-native';
 
@@ -18,7 +18,7 @@ export default function TodoApp() {
     const scheme = useColorScheme();
     const C = scheme === 'dark' ? DARK : LIGHT;
 
-    const { userInfo, loading, request, response, promptAsync, loadStoredAuth, handleAuthToken, signOut } = useAuth();
+    const { userInfo, jwtToken, loading, request, response, promptAsync, loadStoredAuth, handleAuthToken, signOut } = useAuth();
     const { todos, fetchTodos, addTodo, editTodo, toggleTodo, deleteTodo, clearTodos } = useTodos();
     const { permission, banner, setBanner, runNotifications } = useNotifications(userInfo, todos);
 
@@ -26,22 +26,27 @@ export default function TodoApp() {
     const [deadline, setDeadline] = useState('');
     const [editTodoId, setEditTodoId] = useState<number | null>(null);
 
-    // Load stored auth on mount
+    // Restore session on mount
     useEffect(() => {
-        loadStoredAuth(async (userId) => {
-            const data = await fetchTodos(userId);
-            runNotifications(data);
-        });
+        loadStoredAuth();
     }, []);
+
+    // When jwtToken becomes available (login or restore), load todos
+    useEffect(() => {
+        if (jwtToken) {
+            fetchTodos(jwtToken).then(data => runNotifications(data));
+        }
+    }, [jwtToken]);
 
     // Handle Google OAuth response
     useEffect(() => {
         if (response?.type === 'success') {
-            const token = response.authentication?.accessToken;
-            if (token) handleAuthToken(token, async (userId) => {
-                const data = await fetchTodos(userId);
-                runNotifications(data);
-            });
+            const googleToken = response.authentication?.accessToken;
+            if (googleToken) {
+                handleAuthToken(googleToken).then(jwt => {
+                    // fetchTodos will be triggered by the jwtToken useEffect above
+                });
+            }
         }
     }, [response]);
 
@@ -51,20 +56,21 @@ export default function TodoApp() {
     };
 
     const handleSubmit = async () => {
-        if (!text.trim() || !userInfo) return;
+        if (!text.trim() || !userInfo || !jwtToken) return;
         if (editTodoId !== null) {
             const todo = todos.find(t => t.id === editTodoId);
-            await editTodo(editTodoId, text, todo?.completed ?? false, deadline || null);
+            await editTodo(jwtToken, editTodoId, text, todo?.completed ?? false, deadline || null);
             setEditTodoId(null);
         } else {
-            await addTodo(userInfo.id, text, deadline || null);
+            await addTodo(jwtToken, text, deadline || null);
         }
         setText('');
         setDeadline('');
     };
 
     const handleToggle = async (id: number, completed: boolean) => {
-        const updated = await toggleTodo(id, completed);
+        if (!jwtToken) return;
+        const updated = await toggleTodo(jwtToken, id, completed);
         runNotifications(todos.map(t => t.id === id ? updated : t));
     };
 
@@ -128,7 +134,7 @@ export default function TodoApp() {
                             item={item}
                             onToggle={handleToggle}
                             onEdit={handleEdit}
-                            onDelete={deleteTodo}
+                            onDelete={(id) => jwtToken && deleteTodo(jwtToken, id)}
                             C={C}
                             scheme={scheme ?? 'light'}
                         />
