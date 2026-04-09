@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { Alert } from 'react-native';
 import { Todo } from '../types';
 
-const API_URL = 'http://localhost:3000';
+const API_URL = 'https://todo-app-production-e4e4.up.railway.app';
 
 export function useTodos() {
     const [todos, setTodos] = useState<Todo[]>([]);

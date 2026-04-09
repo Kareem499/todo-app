@@ -10,7 +10,7 @@ const GOOGLE_CLIENT_ID = '500399867620-hqsbphh8utgcmjapuscurt91emed1sjn.apps.goo
 const GOOGLE_REDIRECT_URL = 'https://auth.expo.io/@Kareem499/todo-app';
 const JWT_TOKEN_KEY = 'jwt_token';
 const USER_INFO_KEY = 'google_user_info';
-const API_URL = 'http://localhost:3000';
+const API_URL = 'https://todo-app-production-e4e4.up.railway.app';
 
 export function useAuth() {
     const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
