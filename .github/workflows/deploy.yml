@@ -35,6 +35,8 @@ jobs:
 
       - name: Build web app
         run: npm run build:web
+        env:
+          EXPO_ROUTER_BASE_URL: /todo-app
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

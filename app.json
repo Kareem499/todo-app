@@ -24,7 +24,7 @@
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png",
-      "baseUrl": "/todo-app/"
+      "baseUrl": "/todo-app"
     },
     "plugins": [
       "expo-router",
