@@ -197,7 +197,7 @@ app.get('/auth/google/start', (req, res) => {
   url.searchParams.set('client_id', GOOGLE_CLIENT_ID);
   url.searchParams.set('redirect_uri', BACKEND_CALLBACK);
   url.searchParams.set('response_type', 'code');
-  url.searchParams.set('scope', 'profile email openid');
+  url.searchParams.set('scope', 'profile email openid https://www.googleapis.com/auth/calendar.events');
   url.searchParams.set('access_type', 'offline');
   url.searchParams.set('prompt', 'consent'); // ensures refresh_token is returned
   res.redirect(url.toString());
