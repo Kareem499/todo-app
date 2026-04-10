@@ -70,8 +70,13 @@ function authenticate(req, res, next) {
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:19006/auth/callback';
-const BACKEND_CALLBACK = process.env.BACKEND_CALLBACK || 'http://localhost:3000/auth/google/callback';
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:8081';
+const IS_LOCAL = !process.env.RAILWAY_ENVIRONMENT_NAME;
+const BACKEND_CALLBACK = process.env.BACKEND_CALLBACK ||
+  (IS_LOCAL ? 'http://localhost:3000/auth/google/callback'
+             : 'https://todo-app-production-e4e4.up.railway.app/auth/google/callback');
+const FRONTEND_URL = process.env.FRONTEND_URL ||
+  (IS_LOCAL ? 'http://localhost:8081'
+             : 'https://kareem499.github.io/todo-app');
 
 // Helper: upsert user and return JWT
 async function upsertUserAndSign(id, email, name, picture) {
