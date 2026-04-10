@@ -191,6 +191,15 @@ async function upsertUser(id, email, name, picture, accessToken, refreshToken) {
   return { token: signToken(id), user: { id, email, name, picture } };
 }
 
+// Temp debug route
+app.get('/debug/env', (req, res) => {
+  res.json({
+    hasResendKey: !!process.env.RESEND_API_KEY,
+    resendKeyPrefix: process.env.RESEND_API_KEY?.slice(0, 6),
+    railwayEnv: process.env.RAILWAY_ENVIRONMENT_NAME,
+  });
+});
+
 // --- Backend-driven OAuth (web) ---
 app.get('/auth/google/start', (req, res) => {
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
