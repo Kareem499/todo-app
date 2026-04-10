@@ -97,7 +97,8 @@ export function useAuth() {
     }, []);
 
     const signOut = useCallback(async () => {
-        await AsyncStorage.multiRemove([JWT_TOKEN_KEY, USER_INFO_KEY]);
+        await AsyncStorage.removeItem(JWT_TOKEN_KEY);
+        await AsyncStorage.removeItem(USER_INFO_KEY);
         setJwtToken(null);
         setUserInfo(null);
     }, []);
