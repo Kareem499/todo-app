@@ -42,6 +42,7 @@
       ]
     ],
     "experiments": {
+      "baseUrl": "/todo-app",
       "typedRoutes": true,
       "reactCompiler": true
     }
