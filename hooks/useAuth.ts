@@ -2,15 +2,24 @@ import { useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
+import { makeRedirectUri } from 'expo-auth-session';
+import { Platform } from 'react-native';
 import { UserInfo } from '../types';
 
 WebBrowser.maybeCompleteAuthSession();
 
 const GOOGLE_CLIENT_ID = '500399867620-hqsbphh8utgcmjapuscurt91emed1sjn.apps.googleusercontent.com';
-const GOOGLE_REDIRECT_URL = 'https://auth.expo.io/@Kareem499/todo-app';
 const JWT_TOKEN_KEY = 'jwt_token';
 const USER_INFO_KEY = 'google_user_info';
 const API_URL = 'https://todo-app-production-e4e4.up.railway.app';
+
+// On web: uses the current page URL (works for both localhost and GitHub Pages)
+// On native: uses the Expo auth proxy
+const redirectUri = makeRedirectUri(
+    Platform.OS === 'web'
+        ? {}
+        : { native: 'https://auth.expo.io/@Kareem499/todo-app' }
+);
 
 export function useAuth() {
     const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -20,7 +29,7 @@ export function useAuth() {
     const [request, response, promptAsync] = Google.useAuthRequest({
         clientId: GOOGLE_CLIENT_ID,
         scopes: ['profile', 'email'],
-        redirectUrl: GOOGLE_REDIRECT_URL,
+        redirectUri,
     });
 
     // Restores session from storage — no callback needed, jwtToken state drives the fetch
