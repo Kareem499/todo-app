@@ -3,7 +3,6 @@ const cors = require('cors');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
-const { Resend } = require('resend');
 require('dotenv').config();
 
 const app = express();
@@ -75,7 +74,12 @@ function authenticate(req, res, next) {
 }
 
 // --- Resend ---
-const resend = new Resend(process.env.RESEND_API_KEY);
+const { Resend } = require('resend');
+let resend = null;
+function getResend() {
+  if (!resend && process.env.RESEND_API_KEY) resend = new Resend(process.env.RESEND_API_KEY);
+  return resend;
+}
 
 // --- Config ---
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -257,7 +261,9 @@ app.post('/api/auth/email/send-code', async (req, res) => {
       [email, code, expiresAt]
     );
 
-    await resend.emails.send({
+    const r = getResend();
+    if (!r) return res.status(500).json({ error: 'Email service not configured' });
+    await r.emails.send({
       from: 'Todo App <onboarding@resend.dev>',
       to: email,
       subject: `Your login code: ${code}`,
