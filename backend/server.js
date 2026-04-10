@@ -97,18 +97,21 @@ app.post('/api/auth/google/token', async (req, res) => {
   }
 });
 
-// Used by auth code flow (kept for compatibility)
+// Auth code flow — used by web app (Google blocks implicit/token flow for web)
 app.post('/api/auth/google', async (req, res) => {
   try {
-    const { code } = req.body;
+    const { code, redirectUri, codeVerifier } = req.body;
 
-    const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
+    const params = {
       code,
       client_id: GOOGLE_CLIENT_ID,
       client_secret: GOOGLE_CLIENT_SECRET,
-      redirect_uri: REDIRECT_URI,
+      redirect_uri: redirectUri || REDIRECT_URI,
       grant_type: 'authorization_code',
-    });
+      ...(codeVerifier ? { code_verifier: codeVerifier } : {}),
+    };
+
+    const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', params);
 
     const { access_token } = tokenResponse.data;
 

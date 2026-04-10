@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
-import { makeRedirectUri } from 'expo-auth-session';
+import { ResponseType } from 'expo-auth-session';
 import { Platform } from 'react-native';
 import { UserInfo } from '../types';
 
@@ -13,13 +13,18 @@ const JWT_TOKEN_KEY = 'jwt_token';
 const USER_INFO_KEY = 'google_user_info';
 const API_URL = 'https://todo-app-production-e4e4.up.railway.app';
 
-// On web: uses the current page URL (works for both localhost and GitHub Pages)
-// On native: uses the Expo auth proxy
-const redirectUri = makeRedirectUri(
-    Platform.OS === 'web'
-        ? {}
-        : { native: 'https://auth.expo.io/@Kareem499/todo-app' }
-);
+// Web uses authorization code flow (Google deprecated implicit/token flow for web)
+// Native uses the Expo auth proxy with the token flow
+const isWeb = Platform.OS === 'web';
+
+function getRedirectUri(): string {
+    if (!isWeb) return 'https://auth.expo.io/@Kareem499/todo-app';
+    if (typeof window === 'undefined') return 'https://kareem499.github.io/todo-app';
+    // Use the current page URL so Google redirects back to the app
+    return window.location.origin + window.location.pathname.replace(/\/$/, '');
+}
+
+const redirectUri = getRedirectUri();
 
 export function useAuth() {
     const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
@@ -30,9 +35,11 @@ export function useAuth() {
         clientId: GOOGLE_CLIENT_ID,
         scopes: ['profile', 'email'],
         redirectUri,
+        // Use code flow on web to comply with Google's OAuth policy
+        responseType: isWeb ? ResponseType.Code : ResponseType.Token,
+        usePKCE: isWeb,
     });
 
-    // Restores session from storage — no callback needed, jwtToken state drives the fetch
     const loadStoredAuth = useCallback(async () => {
         try {
             const [storedToken, storedUserInfo] = await Promise.all([
@@ -51,7 +58,35 @@ export function useAuth() {
         }
     }, []);
 
-    // Exchanges Google access token for our JWT — returns the JWT so caller can use it immediately
+    const saveSession = async (data: { token: string; user: UserInfo }) => {
+        await AsyncStorage.setItem(JWT_TOKEN_KEY, data.token);
+        await AsyncStorage.setItem(USER_INFO_KEY, JSON.stringify(data.user));
+        setJwtToken(data.token);
+        setUserInfo(data.user);
+    };
+
+    // Web: exchange auth code for JWT via backend
+    const handleAuthCode = useCallback(async (code: string, codeVerifier?: string): Promise<string | null> => {
+        try {
+            setLoading(true);
+            const backendRes = await fetch(`${API_URL}/api/auth/google`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, redirectUri, codeVerifier }),
+            });
+            const data = await backendRes.json();
+            if (!data.token || !data.user) { console.error('Unexpected auth response:', data); return null; }
+            await saveSession(data);
+            return data.token;
+        } catch (e) {
+            console.error(e);
+            return null;
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    // Native: exchange Google access token for JWT via backend
     const handleAuthToken = useCallback(async (googleToken: string): Promise<string | null> => {
         try {
             setLoading(true);
@@ -61,16 +96,9 @@ export function useAuth() {
                 body: JSON.stringify({ accessToken: googleToken }),
             });
             const data = await backendRes.json();
-            if (!data.token || !data.user) {
-                console.error('Unexpected auth response:', data);
-                return null;
-            }
-            const { token: jwtTok, user } = data;
-            await AsyncStorage.setItem(JWT_TOKEN_KEY, jwtTok);
-            await AsyncStorage.setItem(USER_INFO_KEY, JSON.stringify(user));
-            setJwtToken(jwtTok);
-            setUserInfo(user);
-            return jwtTok;
+            if (!data.token || !data.user) { console.error('Unexpected auth response:', data); return null; }
+            await saveSession(data);
+            return data.token;
         } catch (e) {
             console.error(e);
             return null;
@@ -85,5 +113,5 @@ export function useAuth() {
         setUserInfo(null);
     }, []);
 
-    return { userInfo, jwtToken, loading, request, response, promptAsync, loadStoredAuth, handleAuthToken, signOut };
+    return { userInfo, jwtToken, loading, request, response, promptAsync, loadStoredAuth, handleAuthCode, handleAuthToken, signOut };
 }
