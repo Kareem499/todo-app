@@ -298,16 +298,23 @@ app.post('/api/auth/email/verify', async (req, res) => {
     // Clean up used code
     await pool.query('DELETE FROM verification_codes WHERE email = $1', [email]);
 
-    // Upsert user — use email as ID for email-auth users
-    const name = email.split('@')[0];
-    await pool.query(
-      `INSERT INTO users (id, email, name) VALUES ($1, $2, $3)
-       ON CONFLICT (id) DO UPDATE SET email=$2`,
-      [email, email, name]
-    );
+    // Check if a user already exists with this email (e.g. signed in via Google before)
+    const existing = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    let user;
+    if (existing.rows[0]) {
+      // Reuse existing account regardless of how they originally signed up
+      user = existing.rows[0];
+    } else {
+      const name = email.split('@')[0];
+      const inserted = await pool.query(
+        'INSERT INTO users (id, email, name) VALUES ($1, $2, $3) RETURNING *',
+        [email, email, name]
+      );
+      user = inserted.rows[0];
+    }
 
-    const appToken = signToken(email);
-    res.json({ token: appToken, user: { id: email, email, name, picture: null } });
+    const appToken = signToken(user.id);
+    res.json({ token: appToken, user: { id: user.id, email: user.email, name: user.name, picture: user.picture } });
   } catch (error) {
     console.error('Verify code error:', error.message);
     res.status(500).json({ error: 'Verification failed' });
