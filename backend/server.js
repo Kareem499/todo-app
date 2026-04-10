@@ -3,6 +3,7 @@ const cors = require('cors');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const { Resend } = require('resend');
 require('dotenv').config();
 
 const app = express();
@@ -41,6 +42,15 @@ async function initDB() {
   await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS deadline DATE DEFAULT NULL;`);
   await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS calendar_event_id TEXT DEFAULT NULL;`);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS verification_codes (
+      email TEXT NOT NULL,
+      code TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
   console.log('Database tables ready');
 }
 
@@ -63,6 +73,9 @@ function authenticate(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
+
+// --- Resend ---
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // --- Config ---
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -225,6 +238,73 @@ app.post('/api/auth/google/token', async (req, res) => {
   } catch (error) {
     console.error('Auth error:', error.message);
     res.status(400).json({ error: 'Authentication failed' });
+  }
+});
+
+// --- Email OTP Auth ---
+app.post('/api/auth/email/send-code', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.includes('@')) return res.status(400).json({ error: 'Invalid email' });
+
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Remove any existing codes for this email
+    await pool.query('DELETE FROM verification_codes WHERE email = $1', [email]);
+    await pool.query(
+      'INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)',
+      [email, code, expiresAt]
+    );
+
+    await resend.emails.send({
+      from: 'Todo App <onboarding@resend.dev>',
+      to: email,
+      subject: `Your login code: ${code}`,
+      html: `
+        <div style="font-family:sans-serif;max-width:400px;margin:0 auto;padding:32px">
+          <h2 style="margin-bottom:8px">Your login code</h2>
+          <p style="color:#666;margin-bottom:24px">Enter this code to sign in to your Todo App:</p>
+          <div style="font-size:40px;font-weight:bold;letter-spacing:8px;color:#2563eb;margin-bottom:24px">${code}</div>
+          <p style="color:#999;font-size:13px">Expires in 10 minutes. If you didn't request this, ignore this email.</p>
+        </div>
+      `,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Send code error:', error.message);
+    res.status(500).json({ error: 'Failed to send code' });
+  }
+});
+
+app.post('/api/auth/email/verify', async (req, res) => {
+  try {
+    const { email, code } = req.body;
+
+    const result = await pool.query(
+      'SELECT * FROM verification_codes WHERE email = $1 AND code = $2 AND expires_at > NOW()',
+      [email, code]
+    );
+
+    if (!result.rows[0]) return res.status(401).json({ error: 'Invalid or expired code' });
+
+    // Clean up used code
+    await pool.query('DELETE FROM verification_codes WHERE email = $1', [email]);
+
+    // Upsert user — use email as ID for email-auth users
+    const name = email.split('@')[0];
+    await pool.query(
+      `INSERT INTO users (id, email, name) VALUES ($1, $2, $3)
+       ON CONFLICT (id) DO UPDATE SET email=$2`,
+      [email, email, name]
+    );
+
+    const appToken = signToken(email);
+    res.json({ token: appToken, user: { id: email, email, name, picture: null } });
+  } catch (error) {
+    console.error('Verify code error:', error.message);
+    res.status(500).json({ error: 'Verification failed' });
   }
 });
 

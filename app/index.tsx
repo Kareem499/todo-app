@@ -18,7 +18,7 @@ export default function TodoApp() {
     const scheme = useColorScheme();
     const C = scheme === 'dark' ? DARK : LIGHT;
 
-    const { userInfo, jwtToken, loading, request, response, promptAsync, onSignIn, loadStoredAuth, handleAuthToken, signOut } = useAuth();
+    const { userInfo, jwtToken, loading, request, response, promptAsync, onSignIn, loadStoredAuth, handleAuthToken, sendEmailCode, verifyEmailCode, signOut } = useAuth();
     const { todos, fetchTodos, addTodo, editTodo, toggleTodo, deleteTodo, clearTodos } = useTodos();
     const { permission, banner, setBanner, runNotifications } = useNotifications(userInfo, todos);
 
@@ -92,7 +92,7 @@ export default function TodoApp() {
     }
 
     if (!userInfo) {
-        return <SignInScreen request={request} onSignIn={onSignIn} C={C} />;
+        return <SignInScreen request={request} onSignIn={onSignIn} onSendCode={sendEmailCode} onVerifyCode={verifyEmailCode} C={C} />;
     }
 
     return (

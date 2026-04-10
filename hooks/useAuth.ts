@@ -96,6 +96,34 @@ export function useAuth() {
         }
     }, []);
 
+    // Email OTP auth
+    const sendEmailCode = useCallback(async (email: string): Promise<boolean> => {
+        try {
+            const res = await fetch(`${API_URL}/api/auth/email/send-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+            });
+            return res.ok;
+        } catch { return false; }
+    }, []);
+
+    const verifyEmailCode = useCallback(async (email: string, code: string): Promise<boolean> => {
+        try {
+            setLoading(true);
+            const res = await fetch(`${API_URL}/api/auth/email/verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, code }),
+            });
+            const data = await res.json();
+            if (!data.token || !data.user) return false;
+            await saveSession(data.token, data.user);
+            return true;
+        } catch { return false; }
+        finally { setLoading(false); }
+    }, []);
+
     const signOut = useCallback(async () => {
         await AsyncStorage.removeItem(JWT_TOKEN_KEY);
         await AsyncStorage.removeItem(USER_INFO_KEY);
@@ -106,5 +134,5 @@ export function useAuth() {
     // Sign in handler — web uses redirect, native uses expo-auth-session popup
     const onSignIn = Platform.OS === 'web' ? signInWeb : () => promptAsync();
 
-    return { userInfo, jwtToken, loading, request, response, promptAsync, onSignIn, loadStoredAuth, handleAuthToken, signOut };
+    return { userInfo, jwtToken, loading, request, response, promptAsync, onSignIn, loadStoredAuth, handleAuthToken, sendEmailCode, verifyEmailCode, signOut };
 }
