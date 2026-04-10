@@ -70,27 +70,70 @@ function authenticate(req, res, next) {
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const REDIRECT_URI = process.env.REDIRECT_URI || 'http://localhost:19006/auth/callback';
+const BACKEND_CALLBACK = process.env.BACKEND_CALLBACK || 'http://localhost:3000/auth/google/callback';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:8081';
 
-// Used by expo-auth-session flow (access token sent directly)
+// Helper: upsert user and return JWT
+async function upsertUserAndSign(id, email, name, picture) {
+  await pool.query(
+    `INSERT INTO users (id, email, name, picture)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (id) DO UPDATE SET email=$2, name=$3, picture=$4`,
+    [id, email, name, picture]
+  );
+  return { token: signToken(id), user: { id, email, name, picture } };
+}
+
+// --- Backend-driven OAuth (web) ---
+// Step 1: redirect browser to Google login
+app.get('/auth/google/start', (req, res) => {
+  const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+  url.searchParams.set('client_id', GOOGLE_CLIENT_ID);
+  url.searchParams.set('redirect_uri', BACKEND_CALLBACK);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'profile email');
+  url.searchParams.set('access_type', 'online');
+  res.redirect(url.toString());
+});
+
+// Step 2: Google redirects here with code — exchange, sign JWT, redirect to frontend
+app.get('/auth/google/callback', async (req, res) => {
+  try {
+    const { code } = req.query;
+    const tokenResponse = await axios.post('https://oauth2.googleapis.com/token', {
+      code,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      redirect_uri: BACKEND_CALLBACK,
+      grant_type: 'authorization_code',
+    });
+    const { access_token } = tokenResponse.data;
+    const userResponse = await axios.get('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+    const { id, email, name, picture } = userResponse.data;
+    const { token } = await upsertUserAndSign(id, email, name, picture);
+    const user = { id, email, name, picture };
+    const dest = new URL(FRONTEND_URL);
+    dest.searchParams.set('jwt', token);
+    dest.searchParams.set('user', JSON.stringify(user));
+    res.redirect(dest.toString());
+  } catch (error) {
+    console.error('OAuth callback error:', error.message);
+    res.redirect(`${FRONTEND_URL}?error=auth_failed`);
+  }
+});
+
+// Used by native expo-auth-session flow (access token sent directly)
 app.post('/api/auth/google/token', async (req, res) => {
   try {
     const { accessToken } = req.body;
-
     const userResponse = await axios.get('https://www.googleapis.com/userinfo/v2/me', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-
     const { id, email, name, picture } = userResponse.data;
-
-    await pool.query(
-      `INSERT INTO users (id, email, name, picture)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (id) DO UPDATE SET email=$2, name=$3, picture=$4`,
-      [id, email, name, picture]
-    );
-
-    const token = signToken(id);
-    res.json({ token, user: { id, email, name, picture } });
+    const result = await upsertUserAndSign(id, email, name, picture);
+    res.json(result);
   } catch (error) {
     console.error('Auth error:', error.message);
     res.status(400).json({ error: 'Authentication failed' });

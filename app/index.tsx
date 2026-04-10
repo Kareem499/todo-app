@@ -18,7 +18,7 @@ export default function TodoApp() {
     const scheme = useColorScheme();
     const C = scheme === 'dark' ? DARK : LIGHT;
 
-    const { userInfo, jwtToken, loading, request, response, promptAsync, loadStoredAuth, handleAuthCode, handleAuthToken, signOut } = useAuth();
+    const { userInfo, jwtToken, loading, request, response, promptAsync, onSignIn, loadStoredAuth, handleAuthToken, signOut } = useAuth();
     const { todos, fetchTodos, addTodo, editTodo, toggleTodo, deleteTodo, clearTodos } = useTodos();
     const { permission, banner, setBanner, runNotifications } = useNotifications(userInfo, todos);
 
@@ -38,16 +38,10 @@ export default function TodoApp() {
         }
     }, [jwtToken]);
 
-    // Handle Google OAuth response — code flow on web, token flow on native
+    // Native only: handle Google OAuth token response
     useEffect(() => {
-        if (response?.type === 'success') {
-            if (response.params?.code) {
-                // Web: authorization code flow
-                handleAuthCode(response.params.code, request?.codeVerifier ?? undefined);
-            } else if (response.authentication?.accessToken) {
-                // Native: implicit token flow
-                handleAuthToken(response.authentication.accessToken);
-            }
+        if (response?.type === 'success' && response.authentication?.accessToken) {
+            handleAuthToken(response.authentication.accessToken);
         }
     }, [response]);
 
@@ -98,7 +92,7 @@ export default function TodoApp() {
     }
 
     if (!userInfo) {
-        return <SignInScreen request={request} onSignIn={() => promptAsync()} C={C} />;
+        return <SignInScreen request={request} onSignIn={onSignIn} C={C} />;
     }
 
     return (
