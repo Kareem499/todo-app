@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { View, FlatList, StyleSheet, ActivityIndicator, SafeAreaView, KeyboardAvoidingView, Platform, Text } from 'react-native';
+import { View, FlatList, StyleSheet, ActivityIndicator, SafeAreaView, KeyboardAvoidingView, Platform, Text, TouchableOpacity } from 'react-native';
 import { useColorScheme } from 'react-native';
 
 import { LIGHT, DARK } from '../constants/theme';
@@ -192,18 +192,39 @@ export default function TodoApp() {
                 />
                 <ProgressBar completed={completedCount} total={todos.length} C={C} />
 
-                {/* Search + Filter */}
+                {/* Search */}
                 <View style={[styles.searchWrapper, { backgroundColor: C.card, borderBottomColor: C.border }]}>
                     <SearchBar value={search} onChange={setSearch} C={C} />
                 </View>
-                <FilterBar
-                    categories={categories}
-                    activeCategory={activeCategory}
-                    onSelectCategory={setActiveCategory}
-                    showArchived={showArchived}
-                    onToggleArchived={() => setShowArchived(v => !v)}
-                    C={C}
-                />
+
+                {/* Archive toggle always visible + categories if any */}
+                <View style={{ backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.border }}>
+                    <FilterBar
+                        categories={categories}
+                        activeCategory={activeCategory}
+                        onSelectCategory={setActiveCategory}
+                        showArchived={showArchived}
+                        onToggleArchived={() => setShowArchived(v => !v)}
+                        C={C}
+                    />
+                    {/* Archive chip shown even without categories */}
+                    {categories.length === 0 && (
+                        <View style={{ flexDirection: 'row', paddingHorizontal: 18, paddingVertical: 9, gap: 6 }}>
+                            <TouchableOpacity
+                                style={{
+                                    paddingHorizontal: 13, paddingVertical: 6, borderRadius: 20,
+                                    backgroundColor: showArchived ? C.primaryLight : C.bg,
+                                    borderWidth: 1, borderColor: showArchived ? C.primary : C.border,
+                                }}
+                                onPress={() => setShowArchived(v => !v)}
+                            >
+                                <Text style={{ fontSize: 12, fontWeight: '600', color: showArchived ? C.primary : C.subtext }}>
+                                    📦 Archive
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+                </View>
 
                 <FlatList
                     data={displayList}
