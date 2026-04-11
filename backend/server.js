@@ -40,6 +40,12 @@ async function initDB() {
   `);
   await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS deadline DATE DEFAULT NULL;`);
   await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS calendar_event_id TEXT DEFAULT NULL;`);
+  await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'none';`);
+  await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS category TEXT DEFAULT NULL;`);
+  await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS sort_order INTEGER DEFAULT 0;`);
+  await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS recurrence TEXT DEFAULT NULL;`);
+  await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS due_time TEXT DEFAULT NULL;`);
+  await pool.query(`ALTER TABLE todos ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT FALSE;`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS verification_codes (
@@ -98,8 +104,6 @@ async function getValidAccessToken(userId) {
   );
   if (!rows[0]?.google_refresh_token) return null;
 
-  // Try current access token first (quick check by attempting a call)
-  // Refresh using the refresh token
   try {
     const r = await axios.post('https://oauth2.googleapis.com/token', {
       client_id: GOOGLE_CLIENT_ID,
@@ -146,7 +150,6 @@ async function updateCalendarEvent(userId, eventId, text, deadline) {
   if (!token) return;
   try {
     if (!deadline) {
-      // Deadline removed — delete the event
       await axios.delete(
         `https://www.googleapis.com/calendar/v3/calendars/primary/events/${eventId}`,
         { headers: { Authorization: `Bearer ${token}` } }
@@ -199,7 +202,7 @@ app.get('/auth/google/start', (req, res) => {
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', 'profile email openid https://www.googleapis.com/auth/calendar.events');
   url.searchParams.set('access_type', 'offline');
-  url.searchParams.set('prompt', 'consent'); // ensures refresh_token is returned
+  url.searchParams.set('prompt', 'consent');
   res.redirect(url.toString());
 });
 
@@ -252,9 +255,8 @@ app.post('/api/auth/email/send-code', async (req, res) => {
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'Invalid email' });
 
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // Remove any existing codes for this email
     await pool.query('DELETE FROM verification_codes WHERE email = $1', [email]);
     await pool.query(
       'INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)',
@@ -295,14 +297,11 @@ app.post('/api/auth/email/verify', async (req, res) => {
 
     if (!result.rows[0]) return res.status(401).json({ error: 'Invalid or expired code' });
 
-    // Clean up used code
     await pool.query('DELETE FROM verification_codes WHERE email = $1', [email]);
 
-    // Check if a user already exists with this email (e.g. signed in via Google before)
     const existing = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     let user;
     if (existing.rows[0]) {
-      // Reuse existing account regardless of how they originally signed up
       user = existing.rows[0];
     } else {
       const name = email.split('@')[0];
@@ -322,10 +321,25 @@ app.post('/api/auth/email/verify', async (req, res) => {
 });
 
 // --- Todos ---
+
+// Helper: next recurrence deadline
+function nextDeadline(deadline, recurrence) {
+  if (!deadline || !recurrence) return null;
+  const d = new Date(deadline + 'T00:00:00');
+  if (recurrence === 'daily') d.setDate(d.getDate() + 1);
+  else if (recurrence === 'weekly') d.setDate(d.getDate() + 7);
+  else if (recurrence === 'monthly') d.setMonth(d.getMonth() + 1);
+  return d.toISOString().split('T')[0];
+}
+
 app.get('/api/todos', authenticate, async (req, res) => {
   try {
+    const { archived } = req.query;
+    const showArchived = archived === 'true';
     const result = await pool.query(
-      'SELECT * FROM todos WHERE user_id = $1 ORDER BY created_at ASC', [req.userId]
+      `SELECT * FROM todos WHERE user_id = $1 AND archived = $2
+       ORDER BY sort_order ASC, created_at ASC`,
+      [req.userId, showArchived]
     );
     res.json(result.rows);
   } catch (error) {
@@ -336,12 +350,20 @@ app.get('/api/todos', authenticate, async (req, res) => {
 
 app.post('/api/todos', authenticate, async (req, res) => {
   try {
-    const { text, deadline } = req.body;
-    // Create calendar event if deadline is set
+    const { text, deadline, priority = 'none', category = null, recurrence = null, due_time = null } = req.body;
+
+    // Assign sort_order = max + 1
+    const maxRes = await pool.query(
+      'SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM todos WHERE user_id = $1',
+      [req.userId]
+    );
+    const sort_order = maxRes.rows[0].max_order + 1;
+
     const calendarEventId = deadline ? await createCalendarEvent(req.userId, text, deadline) : null;
     const result = await pool.query(
-      'INSERT INTO todos (user_id, text, deadline, calendar_event_id) VALUES ($1, $2, $3, $4) RETURNING *',
-      [req.userId, text, deadline ?? null, calendarEventId]
+      `INSERT INTO todos (user_id, text, deadline, calendar_event_id, priority, category, sort_order, recurrence, due_time)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [req.userId, text, deadline ?? null, calendarEventId, priority, category, sort_order, recurrence, due_time]
     );
     res.json(result.rows[0]);
   } catch (error) {
@@ -353,9 +375,8 @@ app.post('/api/todos', authenticate, async (req, res) => {
 app.patch('/api/todos/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
-    const { completed, text, deadline } = req.body;
+    const { completed, text, deadline, priority, category, recurrence, due_time, archived } = req.body;
 
-    // Get current todo state
     const current = await pool.query(
       'SELECT * FROM todos WHERE id = $1 AND user_id = $2', [id, req.userId]
     );
@@ -367,34 +388,75 @@ app.patch('/api/todos/:id', authenticate, async (req, res) => {
     const deadlineChanged = deadline !== undefined;
     const newDeadline = deadlineChanged ? (deadline || null) : todo.deadline;
 
-    // Sync calendar
-    if (completed === true && calendarEventId) {
-      // Completed → remove from calendar
-      await deleteCalendarEvent(req.userId, calendarEventId);
-      calendarEventId = null;
-    } else if (deadlineChanged) {
-      if (calendarEventId) {
-        const result = await updateCalendarEvent(req.userId, calendarEventId, newText, newDeadline);
-        if (result === 'deleted') calendarEventId = null;
-      } else if (newDeadline) {
-        // Deadline added for the first time
-        calendarEventId = await createCalendarEvent(req.userId, newText, newDeadline);
+    // Sync calendar (skip if archiving)
+    if (archived === undefined) {
+      if (completed === true && calendarEventId) {
+        await deleteCalendarEvent(req.userId, calendarEventId);
+        calendarEventId = null;
+      } else if (deadlineChanged) {
+        if (calendarEventId) {
+          const result = await updateCalendarEvent(req.userId, calendarEventId, newText, newDeadline);
+          if (result === 'deleted') calendarEventId = null;
+        } else if (newDeadline) {
+          calendarEventId = await createCalendarEvent(req.userId, newText, newDeadline);
+        }
+      } else if (text && calendarEventId) {
+        await updateCalendarEvent(req.userId, calendarEventId, newText, todo.deadline);
       }
-    } else if (text && calendarEventId) {
-      // Text changed, update event title
-      await updateCalendarEvent(req.userId, calendarEventId, newText, todo.deadline);
     }
 
     const result = await pool.query(
       `UPDATE todos SET
-        completed = COALESCE($1, completed),
-        text = COALESCE($2, text),
-        deadline = CASE WHEN $3::text IS NOT NULL THEN $3::date ELSE deadline END,
-        calendar_event_id = $4
-       WHERE id = $5 AND user_id = $6 RETURNING *`,
-      [completed ?? null, text ?? null, newDeadline, calendarEventId, id, req.userId]
+        completed   = COALESCE($1, completed),
+        text        = COALESCE($2, text),
+        deadline    = CASE WHEN $3::text IS NOT NULL THEN $3::date ELSE deadline END,
+        calendar_event_id = $4,
+        priority    = COALESCE($5, priority),
+        category    = COALESCE($6, category),
+        recurrence  = COALESCE($7, recurrence),
+        due_time    = COALESCE($8, due_time),
+        archived    = COALESCE($9, archived)
+       WHERE id = $10 AND user_id = $11 RETURNING *`,
+      [
+        completed ?? null,
+        text ?? null,
+        newDeadline,
+        calendarEventId,
+        priority ?? null,
+        category ?? null,
+        recurrence ?? null,
+        due_time ?? null,
+        archived ?? null,
+        id,
+        req.userId,
+      ]
     );
-    res.json(result.rows[0]);
+    const updatedTodo = result.rows[0];
+
+    // Handle recurrence: when completed, spawn next instance
+    if (completed === true && updatedTodo.recurrence && updatedTodo.deadline) {
+      const nd = nextDeadline(
+        updatedTodo.deadline instanceof Date
+          ? updatedTodo.deadline.toISOString().split('T')[0]
+          : String(updatedTodo.deadline).split('T')[0],
+        updatedTodo.recurrence
+      );
+      if (nd) {
+        const maxRes = await pool.query(
+          'SELECT COALESCE(MAX(sort_order), -1) AS max_order FROM todos WHERE user_id = $1',
+          [req.userId]
+        );
+        const nextOrder = maxRes.rows[0].max_order + 1;
+        const calId = await createCalendarEvent(req.userId, updatedTodo.text, nd);
+        await pool.query(
+          `INSERT INTO todos (user_id, text, deadline, calendar_event_id, priority, category, sort_order, recurrence, due_time)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [req.userId, updatedTodo.text, nd, calId, updatedTodo.priority, updatedTodo.category, nextOrder, updatedTodo.recurrence, updatedTodo.due_time]
+        );
+      }
+    }
+
+    res.json(updatedTodo);
   } catch (error) {
     console.error('Update todo error:', error.message);
     res.status(500).json({ error: 'Failed to update todo' });
@@ -415,6 +477,23 @@ app.delete('/api/todos/:id', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Delete todo error:', error.message);
     res.status(500).json({ error: 'Failed to delete todo' });
+  }
+});
+
+// Reorder: accept array of {id, sort_order}
+app.post('/api/todos/reorder', authenticate, async (req, res) => {
+  try {
+    const { order } = req.body; // [{ id, sort_order }, ...]
+    for (const { id, sort_order } of order) {
+      await pool.query(
+        'UPDATE todos SET sort_order = $1 WHERE id = $2 AND user_id = $3',
+        [sort_order, id, req.userId]
+      );
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Reorder error:', error.message);
+    res.status(500).json({ error: 'Failed to reorder' });
   }
 });
 

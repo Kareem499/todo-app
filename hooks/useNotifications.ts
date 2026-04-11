@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Todo, NotificationSummary, UserInfo } from '../types';
 import { getDeadlineSummary } from '../utils/deadline';
-import { requestNotificationPermission, fireDeadlineNotifications } from '../utils/notifications';
+import { requestNotificationPermission, fireDeadlineNotifications, scheduleTimeReminders } from '../utils/notifications';
 
 export function useNotifications(userInfo: UserInfo | null, todos: Todo[]) {
     const [permission, setPermission] = useState<'granted' | 'denied' | 'default' | 'unsupported'>('default');
@@ -12,6 +12,7 @@ export function useNotifications(userInfo: UserInfo | null, todos: Todo[]) {
         const hasAlerts = summary.overdue.length > 0 || summary.today.length > 0 || summary.tomorrow.length > 0;
         setBanner(hasAlerts ? summary : null);
         fireDeadlineNotifications(todoList);
+        scheduleTimeReminders(todoList);
     }, []);
 
     // Request permission when user logs in
